@@ -1,0 +1,206 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# Builds and publishes the smstunnel command-line tool. The release workflow (.github/workflows/release.yml) runs it
+# for a v* tag with the repository's own GITHUB_TOKEN only:
+# - the GitHub release: archives for Windows, macOS and Linux (amd64 and arm64), .deb and .rpm, checksums, SBOMs;
+# - Formula/smstunnel.rb (Homebrew) and bucket/smstunnel.json (Scoop), committed to this same repository;
+# - winget manifests and the AUR PKGBUILD, written to dist/ (attached to the release) for the manual submissions
+#   that their rules ask for (PUBLISHING.md).
+# Try it without publishing: goreleaser release --snapshot --clean
+version: 2
+
+project_name: smstunnel-cli
+
+before:
+  hooks:
+    - go mod verify
+
+builds:
+  - id: smstunnel
+    main: ./cmd/smstunnel
+    binary: smstunnel
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/narcisbodea/smstunnel-cli/internal/cli.Version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: archives
+    ids: [smstunnel]
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds_info:
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: README.md
+        info:
+          mtime: "{{ .CommitDate }}"
+      - src: LICENSE
+        info:
+          mtime: "{{ .CommitDate }}"
+      - src: CHANGELOG.md
+        info:
+          mtime: "{{ .CommitDate }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+sboms:
+  - id: archive-sboms
+    artifacts: archive
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  disable: true # CHANGELOG.md is the changelog; the release notes come from it (release.yml)
+
+release:
+  github:
+    owner: narcisbodea
+    name: smstunnel-cli
+  prerelease: auto
+  extra_files:
+    - glob: ./dist/winget/**/*.yaml
+    - glob: ./dist/aur/smstunnel-cli-bin/PKGBUILD
+    - glob: ./dist/aur/smstunnel-cli-bin/.SRCINFO
+
+nfpms:
+  - id: linux-packages
+    ids: [smstunnel]
+    package_name: smstunnel-cli
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: NARBOWEB SRL
+    homepage: https://smstunnel.io
+    maintainer: Narcis Bodea <contact@narboweb.ro>
+    description: |-
+      Send texts from your computer through your own Android phone and number.
+      The smstunnel command hands each text to your SMSTunnel account, and your phone,
+      with the SMSTunnel app, sends it from its own SIM. Sign-in codes, delivery status,
+      received texts and usage from the command line.
+    license: MIT
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    section: utils
+    priority: optional
+    contents:
+      - src: ./LICENSE
+        dst: /usr/share/doc/smstunnel-cli/copyright
+        file_info:
+          mode: 0644
+        packager: deb
+      - src: ./LICENSE
+        dst: /usr/share/licenses/smstunnel-cli/LICENSE
+        file_info:
+          mode: 0644
+        packager: rpm
+      - src: ./README.md
+        dst: /usr/share/doc/smstunnel-cli/README.md
+        file_info:
+          mode: 0644
+    overrides:
+      deb:
+        suggests: [libsecret-tools] # secret-tool, to keep the key in the system keyring
+      rpm:
+        suggests: [libsecret] # secret-tool
+    rpm:
+      group: Applications/Communications
+      summary: Send texts from your computer through your own Android phone and number
+
+brews:
+  - name: smstunnel
+    ids: [archives]
+    repository:
+      owner: narcisbodea
+      name: smstunnel-cli
+      branch: main
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    directory: Formula
+    commit_author:
+      name: github-actions[bot]
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    commit_msg_template: "Homebrew formula: smstunnel {{ .Version }}"
+    homepage: https://smstunnel.io
+    description: Send texts from your computer through your own Android phone and number
+    license: MIT
+    install: |
+      bin.install "smstunnel"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/smstunnel --version")
+      # No key in the test sandbox: the CLI says how to sign in and ends with exit code 3.
+      output = shell_output("#{bin}/smstunnel phones 2>&1", 3)
+      assert_match "smstunnel login", output
+
+scoops:
+  - name: smstunnel
+    ids: [archives]
+    repository:
+      owner: narcisbodea
+      name: smstunnel-cli
+      branch: main
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    directory: bucket
+    commit_author:
+      name: github-actions[bot]
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    commit_msg_template: "Scoop manifest: smstunnel {{ .Version }}"
+    homepage: https://smstunnel.io
+    description: Send texts from your computer through your own Android phone and number
+    license: MIT
+
+winget:
+  - name: SMSTunnel CLI
+    package_identifier: NARBOWEB.SMSTunnelCLI
+    ids: [archives]
+    publisher: NARBOWEB SRL
+    publisher_url: https://smstunnel.io
+    publisher_support_url: https://smstunnel.io/contact/
+    privacy_url: https://smstunnel.io/privacy/
+    author: Narcis Bodea
+    copyright: Copyright (c) NARBOWEB SRL
+    license: MIT
+    license_url: https://github.com/narcisbodea/smstunnel-cli/blob/main/LICENSE
+    homepage: https://smstunnel.io
+    short_description: Send texts from your computer through your own Android phone and number
+    description: |-
+      The smstunnel command sends texts from your computer through your own Android phone, from your own number.
+      Your phone runs the SMSTunnel app from Google Play and sends each text from its own SIM, so people see a
+      number they know and can reply to it. Sign-in codes, delivery status, received texts and usage too.
+    release_notes_url: https://github.com/narcisbodea/smstunnel-cli/releases/tag/{{ .Tag }}
+    tags: [sms, text-message, android, cli, command-line, sign-in-code]
+    commit_author:
+      name: Narcis Bodea
+      email: contact@narboweb.ro
+    # winget-pkgs takes one package version per pull request, opened by the owner: nothing is pushed.
+    skip_upload: true
+    repository:
+      owner: narcisbodea
+      name: winget-pkgs
+      branch: "NARBOWEB.SMSTunnelCLI-{{ .Version }}"
+
+aurs:
+  - name: smstunnel-cli-bin
+    ids: [archives]
+    homepage: https://smstunnel.io
+    description: Send texts from your computer through your own Android phone and number (SMSTunnel CLI)
+    maintainers:
+      - Narcis Bodea <contact at narboweb dot ro>
+    license: MIT
+    provides: [smstunnel-cli]
+    conflicts: [smstunnel-cli]
+    # The AUR package is pushed by its maintainer over SSH (PUBLISHING.md); nothing is uploaded from here.
+    skip_upload: true
+    private_key: "{{ .Env.AUR_KEY }}"
+    git_url: ssh://aur@aur.archlinux.org/smstunnel-cli-bin.git
+    package: |-
+      install -Dm755 "./smstunnel" "${pkgdir}/usr/bin/smstunnel"
+      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+      install -Dm644 "./README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"

@@ -1,0 +1,16 @@
+# Build output and caches: never committed.
+/build/
+/dist/
+*.exe
+*.test
+*.out
+*.snap
+*.nupkg
+*.pkg.tar.zst
+/packaging/aur/smstunnel-cli-bin/pkg/
+/packaging/aur/smstunnel-cli-bin/src/
+/packaging/aur/smstunnel-cli-bin/*.tar.gz
+/test/parity/results/
+.env
+.env.*
+*.log
