@@ -2,9 +2,9 @@
 # Builds and publishes the smstunnel command-line tool. The release workflow (.github/workflows/release.yml) runs it
 # for a v* tag with the repository's own GITHUB_TOKEN only:
 # - the GitHub release: archives for Windows, macOS and Linux (amd64 and arm64), .deb and .rpm, checksums, SBOMs;
-# - Formula/smstunnel.rb (Homebrew) and bucket/smstunnel.json (Scoop), committed to this same repository;
-# - winget manifests and the AUR PKGBUILD, written to dist/ (attached to the release) for the manual submissions
-#   that their rules ask for (PUBLISHING.md).
+# - Casks/smstunnel.rb (Homebrew) and bucket/smstunnel.json (Scoop), committed to this same repository;
+# - winget manifests, written to dist/; the workflow attaches them (and the AUR PKGBUILD, packaging/aur) to the
+#   release for the manual submissions that their rules ask for (PUBLISHING.md).
 # Try it without publishing: goreleaser release --snapshot --clean
 version: 2
 
@@ -68,10 +68,6 @@ release:
     owner: narcisbodea
     name: smstunnel-cli
   prerelease: auto
-  extra_files:
-    - glob: ./dist/winget/**/*.yaml
-    - glob: ./dist/aur/smstunnel-cli-bin/PKGBUILD
-    - glob: ./dist/aur/smstunnel-cli-bin/.SRCINFO
 
 nfpms:
   - id: linux-packages
@@ -88,6 +84,8 @@ nfpms:
       received texts and usage from the command line.
     license: MIT
     formats: [deb, rpm]
+    # The CLI checks SMSTunnel's certificate against the system's store (the Node.js version has its own copy).
+    dependencies: [ca-certificates]
     bindir: /usr/bin
     section: utils
     priority: optional
@@ -115,29 +113,31 @@ nfpms:
       group: Applications/Communications
       summary: Send texts from your computer through your own Android phone and number
 
-brews:
+# A cask, not a formula: GoReleaser no longer makes formulas for pre-built binaries (brews is deprecated), and
+# Homebrew installs casks on macOS and Linux.
+homebrew_casks:
   - name: smstunnel
     ids: [archives]
+    binaries: [smstunnel]
     repository:
       owner: narcisbodea
       name: smstunnel-cli
       branch: main
       token: "{{ .Env.GITHUB_TOKEN }}"
-    directory: Formula
+    directory: Casks
     commit_author:
       name: github-actions[bot]
       email: 41898282+github-actions[bot]@users.noreply.github.com
-    commit_msg_template: "Homebrew formula: smstunnel {{ .Version }}"
+    commit_msg_template: "Homebrew cask: smstunnel {{ .Version }}"
     homepage: https://smstunnel.io
     description: Send texts from your computer through your own Android phone and number
-    license: MIT
-    install: |
-      bin.install "smstunnel"
-    test: |
-      assert_match version.to_s, shell_output("#{bin}/smstunnel --version")
-      # No key in the test sandbox: the CLI says how to sign in and ends with exit code 3.
-      output = shell_output("#{bin}/smstunnel phones 2>&1", 3)
-      assert_match "smstunnel login", output
+    # The binary is not notarized: without this, macOS refuses to open a download marked as quarantined.
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/smstunnel"]
+          end
 
 scoops:
   - name: smstunnel
@@ -185,22 +185,3 @@ winget:
       owner: narcisbodea
       name: winget-pkgs
       branch: "NARBOWEB.SMSTunnelCLI-{{ .Version }}"
-
-aurs:
-  - name: smstunnel-cli-bin
-    ids: [archives]
-    homepage: https://smstunnel.io
-    description: Send texts from your computer through your own Android phone and number (SMSTunnel CLI)
-    maintainers:
-      - Narcis Bodea <contact at narboweb dot ro>
-    license: MIT
-    provides: [smstunnel-cli]
-    conflicts: [smstunnel-cli]
-    # The AUR package is pushed by its maintainer over SSH (PUBLISHING.md); nothing is uploaded from here.
-    skip_upload: true
-    private_key: "{{ .Env.AUR_KEY }}"
-    git_url: ssh://aur@aur.archlinux.org/smstunnel-cli-bin.git
-    package: |-
-      install -Dm755 "./smstunnel" "${pkgdir}/usr/bin/smstunnel"
-      install -Dm644 "./LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
-      install -Dm644 "./README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"

@@ -28,7 +28,7 @@ Documentation: [smstunnel.io/docs](https://smstunnel.io/docs/) · Dashboard: [da
 | Windows (winget) | `winget install NARBOWEB.SMSTunnelCLI` |
 | Windows (Scoop) | `scoop bucket add smstunnel https://github.com/narcisbodea/smstunnel-cli` then `scoop install smstunnel/smstunnel` |
 | Windows (Chocolatey) | `choco install smstunnel-cli` |
-| macOS, Linux (Homebrew) | `brew tap narcisbodea/smstunnel-cli https://github.com/narcisbodea/smstunnel-cli` then `brew install narcisbodea/smstunnel-cli/smstunnel` |
+| macOS, Linux (Homebrew) | `brew tap narcisbodea/smstunnel-cli https://github.com/narcisbodea/smstunnel-cli` then `brew install --cask smstunnel` |
 | Debian, Ubuntu | download `smstunnel-cli_<version>_amd64.deb` (or `_arm64`) from [Releases](https://github.com/narcisbodea/smstunnel-cli/releases), then `sudo apt install ./smstunnel-cli_*.deb` |
 | Fedora, RHEL, openSUSE | download `smstunnel-cli-<version>-1.x86_64.rpm` (or `.aarch64`) from Releases, then `sudo dnf install ./smstunnel-cli-*.rpm` |
 | Arch Linux (AUR) | `yay -S smstunnel-cli-bin` (or any AUR helper) |

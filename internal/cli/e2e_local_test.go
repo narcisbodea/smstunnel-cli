@@ -106,7 +106,8 @@ func TestLocalAPIEndToEnd(t *testing.T) {
 		for k, v := range extra {
 			env[k] = v
 		}
-		return runCLI(t, cliRun{args: append(append([]string{}, args...), "--api-base", l.base), env: env, stdin: stdin})
+		// --api-base first: a "--" among the arguments would make it part of the text.
+		return runCLI(t, cliRun{args: append([]string{"--api-base", l.base}, args...), env: env, stdin: stdin})
 	}
 
 	login := run([]string{"login"}, false, nil, l.key+"\n")

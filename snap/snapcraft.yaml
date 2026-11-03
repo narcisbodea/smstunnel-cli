@@ -1,0 +1,58 @@
+# The smstunnel command as a snap, built from this repository's source (the Snap Store's builders, or
+# `snapcraft` on Ubuntu). The command is `smstunnel`. Publishing: PUBLISHING.md ("Snap Store").
+#
+# Strict confinement: the snap keeps its own config.json (~/snap/smstunnel/current/.config/smstunnel), so a
+# login made with another installation is not shared with it. Its keyring access (the Secret Service, through the
+# secret-tool it carries) needs `sudo snap connect smstunnel:password-manager-service`; without it the CLI saves
+# the key in that config.json, readable only by you, and says so.
+name: smstunnel
+title: SMSTunnel CLI
+base: core24
+adopt-info: smstunnel
+summary: Send texts from your computer through your own Android phone and number
+description: |
+  The smstunnel command sends texts from your computer through your own Android phone, from
+  your own number. Your phone runs the SMSTunnel app from Google Play and sends each text from
+  its own SIM, so people see a number they know and can reply to it.
+
+  - smstunnel login: save your API key (from dashboard.smstunnel.io, Apps → Add an app)
+  - smstunnel send <number> <message>: one text to one number, optionally --wait until sent
+  - smstunnel code: sign-in codes; status, phones, received texts and usage
+  - --json on every command, documented exit codes, for scripts
+
+  Documentation: https://smstunnel.io/docs/
+grade: stable
+confinement: strict
+license: MIT
+website: https://smstunnel.io
+source-code: https://github.com/narcisbodea/smstunnel-cli
+issues: https://github.com/narcisbodea/smstunnel-cli/issues
+contact: contact@narboweb.ro
+
+platforms:
+  amd64:
+  arm64:
+
+apps:
+  smstunnel:
+    command: bin/smstunnel
+    plugs:
+      - network
+      # The Secret Service (GNOME Keyring, KWallet), where `smstunnel login` keeps the key. Not connected
+      # automatically: sudo snap connect smstunnel:password-manager-service
+      - password-manager-service
+
+parts:
+  smstunnel:
+    plugin: go
+    source: .
+    build-snaps:
+      - go/1.27/stable
+    build-environment:
+      - CGO_ENABLED: "0"
+    override-build: |
+      version="$(sed -n 's/^var Version = "\(.*\)"$/\1/p' internal/cli/constants.go)"
+      craftctl set version="$version"
+      go build -trimpath -ldflags "-s -w" -o "$CRAFT_PART_INSTALL/bin/smstunnel" ./cmd/smstunnel
+    stage-packages:
+      - libsecret-tools # secret-tool (and the libraries it needs), for the Secret Service

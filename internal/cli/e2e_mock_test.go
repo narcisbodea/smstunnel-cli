@@ -32,7 +32,8 @@ func (s *mockSuite) cli(args []string, key string, extra map[string]string, stdi
 	for k, v := range extra {
 		env[k] = v
 	}
-	return runCLI(s.t, cliRun{args: append(append([]string{}, args...), "--api-base", s.mock.apiBase), env: env, stdin: stdin})
+	// --api-base first: a "--" among the arguments would make it part of the text.
+	return runCLI(s.t, cliRun{args: append([]string{"--api-base", s.mock.apiBase}, args...), env: env, stdin: stdin})
 }
 
 func (s *mockSuite) run(args ...string) cliResult { return s.cli(args, keyFull, nil, "") }

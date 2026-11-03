@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Chocolatey package smstunnel-cli. packaging/chocolatey/build.ps1 fills tools\ and packs it for a release:
+     the version comes from choco pack's version argument, not from here. -->
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>smstunnel-cli</id>
+    <version>1.0.0</version>
+    <packageSourceUrl>https://github.com/narcisbodea/smstunnel-cli/tree/main/packaging/chocolatey</packageSourceUrl>
+    <owners>narcisbodea</owners>
+    <title>SMSTunnel CLI</title>
+    <authors>NARBOWEB SRL</authors>
+    <projectUrl>https://smstunnel.io</projectUrl>
+    <iconUrl>https://smstunnel.io/apple-touch-icon.png</iconUrl>
+    <copyright>Copyright (c) NARBOWEB SRL</copyright>
+    <licenseUrl>https://github.com/narcisbodea/smstunnel-cli/blob/main/LICENSE</licenseUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <projectSourceUrl>https://github.com/narcisbodea/smstunnel-cli</projectSourceUrl>
+    <docsUrl>https://smstunnel.io/docs/</docsUrl>
+    <bugTrackerUrl>https://github.com/narcisbodea/smstunnel-cli/issues</bugTrackerUrl>
+    <tags>smstunnel sms text-message android cli command-line sign-in-code</tags>
+    <summary>Send texts from your computer through your own Android phone and number</summary>
+    <description><![CDATA[The `smstunnel` command sends texts from your computer through your own Android phone, from your own number.
+
+Your phone runs the [SMSTunnel app from Google Play](https://play.google.com/store/apps/details?id=io.smstunnel.app) and sends each text from its own SIM, so people see a number they know and can reply to it. The command also sends sign-in codes, checks whether a text went out, lists the texts your phone received and shows what is left of your plan today.
+
+## Get started
+
+1. Install the SMSTunnel app on your Android phone and sign in.
+2. In your dashboard, [dashboard.smstunnel.io/apps](https://dashboard.smstunnel.io/apps), open **Apps → Add an app** and copy the key.
+3. Run `smstunnel login` and paste the key (it is saved in Windows Credential Manager), then `smstunnel send +40712345678 "Hello"`.
+
+One number per text. Documentation: [smstunnel.io/docs](https://smstunnel.io/docs/).
+
+SMSTunnel is not affiliated with, endorsed by, or sponsored by Chocolatey or Microsoft.
+]]></description>
+    <releaseNotes>https://github.com/narcisbodea/smstunnel-cli/blob/main/CHANGELOG.md</releaseNotes>
+  </metadata>
+  <files>
+    <file src="tools\**" target="tools" />
+  </files>
+</package>

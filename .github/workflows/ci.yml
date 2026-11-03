@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Go ${{ matrix.go }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The key store differs per system (Keychain, Credential Manager, Secret Service); the tests use the file
+        # store, and fake the system stores' programs.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        go: ["1.24.x", "stable"]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+      - run: go vet ./...
+      - name: gofmt
+        if: runner.os == 'Linux'
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go test -count=1 ./...
+      - name: Race detector
+        if: runner.os == 'Linux'
+        run: go test -race -count=1 ./...
+
+  packages:
+    name: Snapshot release and packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      # Builds everything a release builds, publishes nothing.
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: v2.19.0
+          args: release --snapshot --clean
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: The .deb installs, and the command works without a key (exit 3, no network)
+        run: |
+          sudo apt-get install -y ./dist/smstunnel-cli_*_amd64.deb
+          smstunnel --version
+          code=0; smstunnel phones || code=$?
+          test "$code" -eq 3
+      - name: AUR package and winget manifests
+        run: |
+          version="$(jq -r .version dist/metadata.json)"
+          packaging/aur/update.sh "$version" dist/checksums.txt dist/aur
+          packaging/winget/finish.sh dist/winget/manifests/n/NARBOWEB/SMSTunnelCLI/"$version"
+
+  snap:
+    name: Snap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: snapcore/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1.3.0
+        id: build
+      - name: The snap installs and runs
+        run: |
+          sudo snap install --dangerous ${{ steps.build.outputs.snap }}
+          smstunnel --version
+          code=0; smstunnel phones || code=$?
+          test "$code" -eq 3

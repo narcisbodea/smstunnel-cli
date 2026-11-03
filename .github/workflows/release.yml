@@ -1,0 +1,89 @@
+# Publishes a release when a tag such as v1.0.1 is pushed, after the "release" environment's reviewer approves.
+# It needs only this repository's GITHUB_TOKEN: GoReleaser makes the GitHub release (archives, .deb, .rpm,
+# checksums, SBOMs) and commits Casks/smstunnel.rb and bucket/smstunnel.json to main; then the winget manifests,
+# the AUR package and the Chocolatey package are attached to the release for the owner's submissions
+# (PUBLISHING.md).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write # the release, and the Casks/ and bucket/ commits
+      id-token: write # build provenance
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.x"
+      - name: The tag matches the version in the code and in CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -q "^var Version = \"${version}\"$" internal/cli/constants.go; then
+            echo "::error::internal/cli/constants.go has $(grep '^var Version' internal/cli/constants.go), the tag is ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          if ! grep -q "^## \[${version}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no entry for ${version}"
+            exit 1
+          fi
+          awk -v v="[${version}]" '/^## \[/ { p = index($0, v) > 0; next } p' CHANGELOG.md >"$RUNNER_TEMP/notes.md"
+      - run: go vet ./...
+      - run: go test -count=1 ./...
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: v2.19.0
+          args: release --clean --release-notes ${{ runner.temp }}/notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.deb
+            dist/*.rpm
+      - name: winget manifests and the AUR package, attached for the manual submissions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          dir="dist/winget/manifests/n/NARBOWEB/SMSTunnelCLI/${version}"
+          packaging/winget/finish.sh "$dir"
+          packaging/aur/update.sh "$version" dist/checksums.txt dist/aur
+          cp dist/aur/PKGBUILD dist/aur/smstunnel-cli-bin.PKGBUILD
+          cp dist/aur/.SRCINFO dist/aur/smstunnel-cli-bin.SRCINFO
+          gh release upload "$GITHUB_REF_NAME" "$dir"/*.yaml dist/aur/smstunnel-cli-bin.PKGBUILD dist/aur/smstunnel-cli-bin.SRCINFO
+
+  chocolatey:
+    needs: release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Pack the Chocolatey package and attach it
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          gh release download $env:GITHUB_REF_NAME --pattern "smstunnel-cli_${version}_windows_amd64.zip" --dir dist
+          ./packaging/chocolatey/build.ps1 -Version $version -Zip "dist/smstunnel-cli_${version}_windows_amd64.zip" -OutDir dist
+          gh release upload $env:GITHUB_REF_NAME "dist/smstunnel-cli.$version.nupkg"

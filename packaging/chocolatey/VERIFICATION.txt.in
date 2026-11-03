@@ -1,0 +1,21 @@
+VERIFICATION
+Verification is intended to assist the Chocolatey moderators and community
+in verifying that this package's contents are trustworthy.
+
+This package is published by the software's vendor, NARBOWEB SRL. tools\smstunnel.exe is the 64-bit Windows
+binary of the smstunnel command (SMSTunnel CLI) @VERSION@, taken unchanged from the release archive on GitHub:
+
+  https://github.com/narcisbodea/smstunnel-cli/releases/download/v@VERSION@/smstunnel-cli_@VERSION@_windows_amd64.zip
+
+To check it:
+
+1. Download the archive above, and the release's checksums.txt:
+   https://github.com/narcisbodea/smstunnel-cli/releases/download/v@VERSION@/checksums.txt
+2. The archive's SHA-256 is listed in checksums.txt, and is:
+   @SHA256_ZIP@
+3. Extract smstunnel.exe from the archive. Its SHA-256, the same as tools\smstunnel.exe in this package, is:
+   @SHA256_EXE@
+
+   PowerShell: Get-FileHash .\smstunnel.exe -Algorithm SHA256
+
+The source code is at https://github.com/narcisbodea/smstunnel-cli (MIT license, tools\LICENSE.txt).

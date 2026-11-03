@@ -16,6 +16,6 @@ version number has the same commands, options, output and exit codes.
   codes.
 - The key is saved where the Node.js version saves it (the macOS Keychain, Windows Credential Manager, the Linux
   Secret Service, or `config.json`), in the same format, so either version uses a login made with the other.
-- Packages: archives with checksums and SBOMs, `.deb` and `.rpm` (`smstunnel-cli`), a Homebrew formula and a Scoop
-  manifest in this repository, winget manifests (`NARBOWEB.SMSTunnelCLI`), an AUR package (`smstunnel-cli-bin`), a
-  Chocolatey package (`smstunnel-cli`) and a snap (`smstunnel`).
+- Packages: archives with checksums, SBOMs and build provenance, `.deb` and `.rpm` (`smstunnel-cli`), a Homebrew cask
+  and a Scoop manifest in this repository, winget manifests (`NARBOWEB.SMSTunnelCLI`), an AUR package
+  (`smstunnel-cli-bin`), a Chocolatey package (`smstunnel-cli`) and a snap (`smstunnel`).

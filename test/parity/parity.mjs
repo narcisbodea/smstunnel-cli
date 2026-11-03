@@ -25,9 +25,14 @@ const CLIS = {
   go: { cmd: goCli, args: [] },
 };
 
-function cleanEnv(extra = {}) {
+// Every run gets SMSTUNNEL_API_BASE pointing at a closed local port unless a scenario sets it or must read the
+// address saved by login (guard: false): a scenario that loses its --api-base can never reach smstunnel.io.
+const GUARD_API_BASE = 'http://127.0.0.1:9/api/v1';
+
+function cleanEnv(extra = {}, guard = true) {
   const env = { ...process.env };
   for (const name of Object.keys(env)) if (name.toUpperCase().startsWith('SMSTUNNEL_')) delete env[name];
+  if (guard) env.SMSTUNNEL_API_BASE = GUARD_API_BASE;
   for (const [name, value] of Object.entries(extra)) {
     if (value === undefined) delete env[name];
     else env[name] = value;
@@ -102,11 +107,11 @@ async function mockScenarios(cli) {
   const configDir = path.join(dir, 'config');
   const base = { SMSTUNNEL_CONFIG_DIR: configDir, SMSTUNNEL_KEY_STORE: 'file', SMSTUNNEL_POLL_INTERVAL_MS: '100' };
   const out = [];
-  const record = async (name, args, { key = KEYS.full, env = {}, input, apiBase = true, watch } = {}) => {
+  const record = async (name, args, { key = KEYS.full, env = {}, input, apiBase = true, watch, guard = true } = {}) => {
     const before = mock.state.requests.length;
-    const allArgs = apiBase ? [...args, '--api-base', mock.apiBase] : args;
+    const allArgs = apiBase ? ['--api-base', mock.apiBase, ...args] : args;
     const result = await run(cli, allArgs, {
-      env: cleanEnv({ ...base, SMSTUNNEL_API_KEY: key === null ? undefined : key, ...env }),
+      env: cleanEnv({ ...base, SMSTUNNEL_API_KEY: key === null ? undefined : key, ...env }, guard),
       input,
       ...(watch ? watch(mock) : {}),
     });
@@ -136,8 +141,8 @@ async function mockScenarios(cli) {
   await record('login bad key spaces', ['login'], { key: null, input: '  sk live x  \n' });
   await record('login', ['login'], { key: null, input: `\n   ${KEYS.full}   \nignored\n` });
   out.push({ name: 'config.json after login', file: fs.readFileSync(path.join(configDir, 'config.json'), 'utf8') });
-  await record('phones with the saved key and address', ['phones'], { key: null, apiBase: false });
-  await record('SMSTUNNEL_API_KEY wins', ['phones'], { key: KEYS.refused, apiBase: false });
+  await record('phones with the saved key and address', ['phones'], { key: null, apiBase: false, guard: false });
+  await record('SMSTUNNEL_API_KEY wins', ['phones'], { key: KEYS.refused, apiBase: false, guard: false });
   await record('login again --json, with SMSTUNNEL_API_KEY set', ['login', '--json'], { key: KEYS.sendOnly, input: `${KEYS.full}\n` });
   await record('logout --json, with SMSTUNNEL_API_KEY set', ['logout', '--json'], { key: KEYS.sendOnly, apiBase: false });
   await record('logout again', ['logout'], { key: null, apiBase: false });
@@ -268,7 +273,7 @@ async function mockScenarios(cli) {
   await record('broken config.json', ['phones'], { key: null, apiBase: false });
   await record('broken config.json, logout', ['logout'], { key: null, apiBase: false });
   fs.writeFileSync(path.join(configDir, 'config.json'), '{"apiKey":5}');
-  await record('a number as the saved key', ['phones'], { key: null });
+  await record('a number as the saved key', ['phones'], { key: null, apiBase: true });
   fs.rmSync(path.join(configDir, 'config.json'));
   await mock.close();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -294,7 +299,7 @@ async function localScenarios(cli, api, stamp) {
   const out = [];
   const idem = `parity-${cli}-${stamp}`;
   const record = async (name, args, { key = api.key, env = {}, input } = {}) => {
-    const result = await run(cli, [...args, '--api-base', api.base], { env: cleanEnv({ ...base, SMSTUNNEL_API_KEY: key === null ? undefined : key, ...env }), input });
+    const result = await run(cli, ['--api-base', api.base, ...args], { env: cleanEnv({ ...base, SMSTUNNEL_API_KEY: key === null ? undefined : key, ...env }), input });
     out.push({ name, result, replacements: [[configDir, '<config>'], [dir, '<dir>'], [idem, '<idempotency key>']] });
     return result;
   };
@@ -332,7 +337,7 @@ async function crossLogin(api, base) {
   for (const store of ['file', process.platform === 'win32' ? 'auto' : null].filter(Boolean)) {
     for (const [first, second] of [['node', 'go'], ['go', 'node']]) {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'smstunnel-parity-cross-'));
-      const env = cleanEnv({ SMSTUNNEL_CONFIG_DIR: path.join(dir, 'config'), SMSTUNNEL_KEY_STORE: store, SMSTUNNEL_KEYCHAIN_SERVICE: 'smstunnel-cli-parity-test' });
+      const env = cleanEnv({ SMSTUNNEL_CONFIG_DIR: path.join(dir, 'config'), SMSTUNNEL_KEY_STORE: store, SMSTUNNEL_KEYCHAIN_SERVICE: 'smstunnel-cli-parity-test' }, false);
       const login = await run(first, ['login', '--api-base', base.apiBase], { env, input: `${base.key}\n` });
       const phones = await run(second, ['phones'], { env });
       const logout = await run(second, ['logout'], { env });
