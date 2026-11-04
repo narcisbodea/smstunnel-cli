@@ -1,0 +1,51 @@
+# Pushes the Chocolatey package that the Release workflow attached to a GitHub release (smstunnel-cli.<version>.nupkg)
+# to the Chocolatey Community Repository. Chocolatey takes packages only through `choco push` with the owner's API
+# key, which lives as the secret CHOCOLATEY_API_KEY in the `chocolatey` environment (Settings → Environments).
+# Runs by itself after a successful Release, or by hand (Actions → Chocolatey → Run workflow) for a given version.
+# The package then waits for Chocolatey's moderation (days to two weeks for a new package).
+name: Chocolatey
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to push, without the v (for example 1.0.0)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  push:
+    name: Push to the Chocolatey Community Repository
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: windows-latest
+    environment: chocolatey
+    steps:
+      - name: Which version
+        id: version
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          $v = if ($env:INPUT_VERSION) { $env:INPUT_VERSION } else { $env:RUN_TAG.TrimStart('v') }
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { Write-Error "Not a release version: '$v'"; exit 1 }
+          "version=$v" >> $env:GITHUB_OUTPUT
+      - name: Download the package from the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh release download "v$env:VERSION" --repo "${{ github.repository }}" --pattern "smstunnel-cli.$env:VERSION.nupkg"
+      - name: Push it
+        shell: pwsh
+        env:
+          CHOCOLATEY_API_KEY: ${{ secrets.CHOCOLATEY_API_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if (-not $env:CHOCOLATEY_API_KEY) { Write-Error "The chocolatey environment has no CHOCOLATEY_API_KEY secret."; exit 1 }
+          choco push "smstunnel-cli.$env:VERSION.nupkg" --source https://push.chocolatey.org/ --api-key $env:CHOCOLATEY_API_KEY
