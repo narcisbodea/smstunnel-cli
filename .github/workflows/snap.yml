@@ -1,0 +1,51 @@
+# Builds the snap from the released tag and uploads it to the Snap Store (snap `smstunnel`), on the stable channel.
+# The store login lives as the secret SNAPCRAFT_STORE_CREDENTIALS in the `snapcraft` environment: the owner made it
+# with `snapcraft export-login` (limited to the smstunnel snaps and to uploading/releasing them).
+# Runs by itself after a successful Release, or by hand (Actions → Snap Store → Run workflow) for a given version.
+name: Snap Store
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build and upload, without the v (for example 1.0.0)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  snap:
+    name: Build and upload to the Snap Store
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: snapcraft
+    steps:
+      - name: Which version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          RUN_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          v="${INPUT_VERSION:-${RUN_TAG#v}}"
+          if ! printf '%s' "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then echo "::error::Not a release version: '$v'"; exit 1; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: v${{ steps.version.outputs.version }}
+          persist-credentials: false
+      - uses: snapcore/action-build@3bdaa03e1ba6bf59a65f84a751d943d549a54e79 # v1.3.0
+        id: build
+      - name: The snap installs and runs
+        run: |
+          sudo snap install --dangerous ${{ steps.build.outputs.snap }}
+          smstunnel --version
+      - uses: snapcore/action-publish@214b86e5ca036ead1668c79afb81e550e6c54d40 # v1.2.0
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.build.outputs.snap }}
+          release: stable
