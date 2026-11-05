@@ -8,8 +8,8 @@ and plan. It also checks whether a text went out, sends sign-in codes, lists the
 what is left of your plan today.
 
 This is the native version: one small program for Windows, macOS and Linux, nothing else to install. It behaves
-exactly like the Node.js version on npm (`npm install -g smstunnel`): the same commands, options, output and exit
-codes, and the same saved login, so you can use either.
+exactly like the Node.js version (coming to npm as `smstunnel`): the same commands, options, output and exit codes,
+and the same saved login, so you can use either.
 
 - Your API key stays in your system keychain (macOS Keychain, Windows Credential Manager, the Linux Secret Service),
   or in a file only you can read.
@@ -25,16 +25,15 @@ Documentation: [smstunnel.io/docs](https://smstunnel.io/docs/) · Dashboard: [da
 
 | System | Command |
 |---|---|
-| Windows (winget) | `winget install NARBOWEB.SMSTunnelCLI` |
 | Windows (Scoop) | `scoop bucket add smstunnel https://github.com/narcisbodea/smstunnel-cli` then `scoop install smstunnel/smstunnel` |
-| Windows (Chocolatey) | `choco install smstunnel-cli` |
 | macOS, Linux (Homebrew) | `brew tap narcisbodea/smstunnel-cli https://github.com/narcisbodea/smstunnel-cli` then `brew install --cask smstunnel` |
 | Debian, Ubuntu | download `smstunnel-cli_<version>_amd64.deb` (or `_arm64`) from [Releases](https://github.com/narcisbodea/smstunnel-cli/releases), then `sudo apt install ./smstunnel-cli_*.deb` |
 | Fedora, RHEL, openSUSE | download `smstunnel-cli-<version>-1.x86_64.rpm` (or `.aarch64`) from Releases, then `sudo dnf install ./smstunnel-cli-*.rpm` |
-| Arch Linux (AUR) | `yay -S smstunnel-cli-bin` (or any AUR helper) |
-| Ubuntu and other Linux (snap) | `sudo snap install smstunnel` |
+| Ubuntu and other Linux, x64 (snap) | `sudo snap install smstunnel` |
 | Go 1.24 or newer | `go install github.com/narcisbodea/smstunnel-cli/cmd/smstunnel@latest` |
-| Node.js | `npm install -g smstunnel` (the Node.js version, same commands) |
+
+Coming soon: winget (`winget install NARBOWEB.SMSTunnelCLI`, in review), Chocolatey (`choco install smstunnel-cli`, in
+moderation), the AUR (`smstunnel-cli-bin`) and npm (the Node.js version).
 
 Or download the archive for your system from [Releases](https://github.com/narcisbodea/smstunnel-cli/releases) (check it
 against `checksums.txt`) and put `smstunnel` (`smstunnel.exe` on Windows) somewhere on your `PATH`.
@@ -232,7 +231,7 @@ a prompt.
 ```text
 Write a script that sends texts with the SMSTunnel command-line tool. SMSTunnel sends each text from my own Android phone, from my own number: the phone runs the SMSTunnel app and is linked to my SMSTunnel account.
 
-Setup: install the `smstunnel` command (winget install NARBOWEB.SMSTunnelCLI, Homebrew, the .deb/.rpm from github.com/narcisbodea/smstunnel-cli/releases, or npm install -g smstunnel). The API key comes from the environment variable SMSTUNNEL_API_KEY (in CI, a secret), or from `smstunnel login`, which reads it from stdin and saves it in the system keychain.
+Setup: install the `smstunnel` command (Scoop or Homebrew, sudo snap install smstunnel, the .deb/.rpm from github.com/narcisbodea/smstunnel-cli/releases, or go install github.com/narcisbodea/smstunnel-cli/cmd/smstunnel@latest). The API key comes from the environment variable SMSTUNNEL_API_KEY (in CI, a secret), or from `smstunnel login`, which reads it from stdin and saves it in the system keychain.
 
 Commands:
 - smstunnel send <number> <text> [--phone <id or name>] [--country +40] [--wait [--timeout 120]] [--idempotency-key <key>] [--json]
