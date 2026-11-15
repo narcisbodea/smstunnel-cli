@@ -35,6 +35,8 @@ const (
 	numServerProblem   = "+15550000500"
 	numValidation      = "+15550000400"
 	numConnectionDrops = "+15550000999"
+	numOldServer       = "+15550000410"
+	numScheduleFull    = "+15550000411"
 	idemInProgress     = "still-in-progress"
 )
 
@@ -57,6 +59,16 @@ type stored struct {
 	body        js.Value
 }
 
+// mockScheduled is a text scheduled with sendAt, by the key that scheduled it. sending is SMSTunnel handing it to
+// the phone right now: it still reads as "scheduled", and can't be canceled.
+type mockScheduled struct {
+	id, key, to, message string
+	deviceID, messageID  string
+	status, reason       string
+	sendAt, createdAt    float64
+	sending              bool
+}
+
 type mockAPI struct {
 	mu          sync.Mutex
 	server      *httptest.Server
@@ -67,10 +79,11 @@ type mockAPI struct {
 	counter     int
 	idempotency map[string]stored
 	replays     int
+	scheduled   map[string]*mockScheduled
 }
 
 func startMock(t *testing.T) *mockAPI {
-	m := &mockAPI{messages: map[string]*mockMessage{}, idempotency: map[string]stored{}}
+	m := &mockAPI{messages: map[string]*mockMessage{}, idempotency: map[string]stored{}, scheduled: map[string]*mockScheduled{}}
 	now := time.Now()
 	m.received = []js.Value{
 		receivedText("e5e5e5e5e5e5e5e5e5e5e5e5", "+40711111111", "Earlier reply", now.Add(-3*time.Hour)),
@@ -174,10 +187,12 @@ type mockAnswer struct {
 	drop    bool
 }
 
-func (m *mockAPI) sendAnswer(path string, body js.Value) mockAnswer {
+func (m *mockAPI) sendAnswer(path, key string, body js.Value) mockAnswer {
 	for _, k := range body.Keys() {
-		switch k {
-		case "to", "message", "deviceId", "defaultCountryCode":
+		switch {
+		case k == "to" || k == "message" || k == "deviceId" || k == "defaultCountryCode":
+		case k == "sendAt" && path == "/sms/send" && !body.Get("to").StrictEquals(numOldServer):
+			// scheduled texts; numOldServer answers like SMSTunnel before them
 		default:
 			return mockAnswer{status: 400, body: obj("statusCode", 400, "message", []string{"property " + k + " should not exist"}, "error", "Bad Request")}
 		}
@@ -199,6 +214,9 @@ func (m *mockAPI) sendAnswer(path string, body js.Value) mockAnswer {
 		return mockAnswer{status: 400, body: obj("statusCode", 400, "message", []string{"Phone number must contain 7-25 characters", "second problem"}, "error", "Bad Request")}
 	case numConnectionDrops:
 		return mockAnswer{drop: true}
+	}
+	if !body.Get("sendAt").IsUndefined() {
+		return m.scheduleAnswer(key, body)
 	}
 	if path == "/sms/send-2fa" && !containsSignInCode(message.Str()) {
 		return mockAnswer{status: 400, body: obj("statusCode", 400, "message", "Invalid 2FA message: No valid verification code found", "error", "Bad Request")}
@@ -286,6 +304,11 @@ func (m *mockAPI) handle(w http.ResponseWriter, r *http.Request) {
 		m.handleStatus(w, strings.TrimPrefix(path, "/sms/status/"))
 	case r.Method == "GET" && path == "/sms/received":
 		m.handleReceived(w, r, key)
+	case r.Method == "GET" && path == "/sms/scheduled":
+		m.handleScheduledList(w, r, key)
+	case (r.Method == "GET" || r.Method == "DELETE") && strings.HasPrefix(path, "/sms/scheduled/") &&
+		!strings.Contains(strings.TrimPrefix(path, "/sms/scheduled/"), "/"):
+		m.handleScheduledOne(w, r.Method, strings.TrimPrefix(path, "/sms/scheduled/"), key)
 	case r.Method == "GET" && path == "/account/usage":
 		jsonBody(w, 200, obj("success", true, "data", obj(
 			"plan", "free", "accountType", "standard",
@@ -308,7 +331,7 @@ func (m *mockAPI) drop(w http.ResponseWriter) {
 func (m *mockAPI) handleSend(w http.ResponseWriter, r *http.Request, path, key string, body js.Value) {
 	idemKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if idemKey == "" {
-		a := m.sendAnswer(path, body)
+		a := m.sendAnswer(path, key, body)
 		if a.drop {
 			m.drop(w)
 			return
@@ -333,7 +356,7 @@ func (m *mockAPI) handleSend(w http.ResponseWriter, r *http.Request, path, key s
 		jsonBody(w, s.status, s.body, "Idempotent-Replayed", "true")
 		return
 	}
-	a := m.sendAnswer(path, body)
+	a := m.sendAnswer(path, key, body)
 	if a.drop {
 		m.idempotency[scope] = stored{fingerprint, 500, obj("statusCode", 500, "message", "Internal server error")}
 		m.drop(w)
@@ -374,6 +397,130 @@ func (m *mockAPI) handleStatus(w http.ResponseWriter, id string) {
 		data.Set("sentAt", js.StringValue(js.ISOString(float64(time.Now().UnixMilli())))).Set("status", js.StringValue("sent")).Set("deliveryStatus", js.StringValue("sent"))
 	}
 	jsonBody(w, 200, obj("success", true, "data", data))
+}
+
+// view is a scheduled text as SMSTunnel's API shows it to the key that scheduled it.
+func (s *mockScheduled) view() js.Value {
+	orNull := func(v string) any {
+		if v == "" {
+			return nil
+		}
+		return v
+	}
+	return obj("id", s.id, "to", s.to, "message", s.message, "sendAt", js.ISOString(s.sendAt), "status", s.status,
+		"deviceId", orNull(s.deviceID), "messageId", orNull(s.messageID), "error", orNull(s.reason), "createdAt", js.ISOString(s.createdAt))
+}
+
+// scheduleAnswer is POST /sms/send with sendAt, as SMSTunnel answers it: the same checks in the same order.
+func (m *mockAPI) scheduleAnswer(key string, body js.Value) mockAnswer {
+	refuse := func(status int, code, message string, extra ...any) mockAnswer {
+		name := map[int]string{400: "Bad Request", 403: "Forbidden", 404: "Not Found"}[status]
+		return mockAnswer{status: status, body: obj(append([]any{"statusCode", status, "error", name, "code", code, "message", message}, extra...)...)}
+	}
+	sendAt := body.Get("sendAt")
+	at := js.DateOf(sendAt)
+	now := float64(time.Now().UnixMilli())
+	switch {
+	case !sendAt.IsString() || !js.IsValid(at):
+		return refuse(400, "SCHEDULE_INVALID_INPUT", "Check the phone, the number, the text and the time.")
+	case at < now+60000:
+		return refuse(400, "SCHEDULE_TOO_SOON", "Pick a time at least a minute from now. To send it now, use Send.")
+	case at > now+30*86400000:
+		return refuse(400, "SCHEDULE_TOO_FAR", "Pick a time within the next 30 days.")
+	}
+	deviceID := ""
+	if d := body.Get("deviceId"); !d.IsUndefined() {
+		for _, p := range mockPhones {
+			if d.StrictEquals(p.id) {
+				deviceID = p.id
+			}
+		}
+		if deviceID == "" {
+			return refuse(404, "SCHEDULE_PHONE_NOT_FOUND", "This phone isn't in your account anymore.")
+		}
+	}
+	if body.Get("to").StrictEquals(numScheduleFull) {
+		return refuse(403, "SCHEDULE_LIMIT_REACHED", "You have as many scheduled texts as your plan allows. Wait until some go out, or cancel one.", "max", 10)
+	}
+	m.counter++
+	s := &mockScheduled{id: fmt.Sprintf("5c%022x", m.counter), key: key, to: body.Get("to").Str(), message: body.Get("message").Str(),
+		deviceID: deviceID, status: "scheduled", sendAt: at, createdAt: now}
+	m.scheduled[s.id] = s
+	return mockAnswer{status: 200, body: obj("success", true, "scheduled", true, "scheduledId", s.id, "sendAt", js.ISOString(at), "data", s.view())}
+}
+
+// handleScheduledList is GET /sms/scheduled: the key's own texts, waiting ones soonest first, done ones (scope=done)
+// newest first; "waiting" counts the whole account's.
+func (m *mockAPI) handleScheduledList(w http.ResponseWriter, r *http.Request, key string) {
+	q := r.URL.Query()
+	done := q.Get("scope") == "done"
+	page, limit := 1, 50
+	if v := q.Get("page"); v != "" {
+		fmt.Sscan(v, &page)
+	}
+	if v := q.Get("limit"); v != "" {
+		fmt.Sscan(v, &limit)
+	}
+	page, limit = min(max(page, 1), 1000), min(max(limit, 1), 100)
+	var rows []*mockScheduled
+	waiting := 0
+	for _, s := range m.scheduled {
+		if s.status == "scheduled" {
+			waiting++
+		}
+		if s.key == key && done == (s.status != "scheduled") {
+			rows = append(rows, s)
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if done {
+			return rows[i].sendAt > rows[j].sendAt
+		}
+		return rows[i].sendAt < rows[j].sendAt
+	})
+	items := []js.Value{}
+	for i := (page - 1) * limit; i < len(rows) && i < page*limit; i++ {
+		items = append(items, rows[i].view())
+	}
+	jsonBody(w, 200, obj("success", true, "data", obj("items", js.ArrayValue(items), "total", len(rows), "page", page, "limit", limit,
+		"waiting", waiting, "max", 10)))
+}
+
+// handleScheduledOne is GET and DELETE /sms/scheduled/{id}: only the key's own; DELETE only while it waits.
+func (m *mockAPI) handleScheduledOne(w http.ResponseWriter, method, id, key string) {
+	s, ok := m.scheduled[id]
+	if !ok || s.key != key {
+		jsonBody(w, 404, obj("statusCode", 404, "error", "Not Found", "code", "SCHEDULE_NOT_FOUND", "message", "This scheduled text no longer exists."))
+		return
+	}
+	if method == "DELETE" {
+		if s.status != "scheduled" || s.sending {
+			jsonBody(w, 409, obj("statusCode", 409, "error", "Conflict", "code", "SCHEDULE_NOT_EDITABLE",
+				"message", "This text has already gone out or was canceled, or was scheduled through the API (cancel it instead)."))
+			return
+		}
+		s.status = "canceled"
+	}
+	jsonBody(w, 200, obj("success", true, "data", s.view()))
+}
+
+// endScheduled does what SMSTunnel's job does at a text's time: status "sent" (with its message id) or "failed"
+// (with the reason); "sending" leaves it waiting, being handed to the phone.
+func (m *mockAPI) endScheduled(id, status, messageID, reason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s := m.scheduled[id]
+	if status == "sending" {
+		s.sending = true
+		return
+	}
+	s.status, s.messageID, s.reason = status, messageID, reason
+}
+
+func (m *mockAPI) scheduledCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.scheduled)
 }
 
 func (m *mockAPI) handleReceived(w http.ResponseWriter, r *http.Request, key string) {

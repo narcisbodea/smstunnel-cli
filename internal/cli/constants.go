@@ -3,8 +3,9 @@
 package cli
 
 // Version is the CLI's version. Release builds set it with -ldflags "-X <module>/internal/cli.Version=<x.y.z>";
-// it is kept equal to the Node.js version's package.json.
-var Version = "1.0.0"
+// it is kept equal to the Node.js version's package.json, except that 1.1.0 (scheduled texts) comes here first
+// (COMPATIBILITY.md).
+var Version = "1.1.0"
 
 const (
 	defaultAPIBase = "https://smstunnel.io/api/v1"

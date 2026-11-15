@@ -11,6 +11,8 @@ import (
 
 const alreadySent = "Already handed over with this --idempotency-key: SMSTunnel gave back its answer to the first request and did not send the text again."
 
+const alreadyScheduled = "Already scheduled with this --idempotency-key: SMSTunnel gave back its answer to the first request and did not schedule the text again."
+
 const defaultTimeoutSeconds = 120
 
 // outcomeOf is a final state of a status, or "" while the text still waits for the phone.
@@ -108,6 +110,18 @@ func send(c *runContext, args []string, code bool) (int, error) {
 		}
 		idempotencyKey = checked
 	}
+	// send --at (code has no --at): the time goes in UTC, the way the CLI prints it back.
+	at, atText := 0.0, ""
+	if v, ok := c.opts.str("at"); ok {
+		t, valid := parseAt(v)
+		if !valid {
+			return 0, usageError(`--at takes a date and a time, like "2026-11-16 09:00" (this computer's time zone) or 2026-11-16T07:00:00Z.`)
+		}
+		if wait {
+			return 0, usageError(`--wait doesn't go with --at: a scheduled text goes out at its time. Follow it with "smstunnel scheduled".`)
+		}
+		at, atText = t, formatWhen(t)
+	}
 
 	key, err := requireKey(c)
 	if err != nil {
@@ -135,9 +149,20 @@ func send(c *runContext, args []string, code bool) (int, error) {
 	if country != "" {
 		body.Set("defaultCountryCode", js.StringValue(country))
 	}
+	if atText != "" {
+		body.Set("sendAt", js.StringValue(js.ISOString(at)))
+	}
 	res, err := client.sendText(code, body, idempotencyKey)
 	if err != nil {
+		var apiErr *apiError
+		if atText != "" && errors.As(err, &apiErr) {
+			return 0, describeAPIError(apiErr, errorContext{operation: op, keySource: key.source, apiBase: c.apiBase,
+				idempotencyKey: idempotencyKey != "", scheduleAt: atText})
+		}
 		return 0, c.describe(err, op, key.source, idempotencyKey != "")
+	}
+	if atText != "" {
+		return reportScheduled(c, res, message, at)
 	}
 	response, data := res.body, res.body.Get("data")
 	messageID := response.Get("messageId")

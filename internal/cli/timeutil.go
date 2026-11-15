@@ -3,6 +3,7 @@ package cli
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/narcisbodea/smstunnel-cli/internal/js"
 )
@@ -121,6 +122,88 @@ func formatAgo(v js.Value, nowMs float64) string {
 		return js.NumberToString(hours) + " h ago"
 	}
 	return js.NumberToString(js.Round(hours/24)) + " days ago"
+}
+
+// parseAt reads send --at: a date and a time, YYYY-MM-DD then T or a space then HH:MM[:SS[.fraction]], with an
+// offset (Z, +02:00) for that exact moment, or without one in this computer's time zone (as Date.parse reads
+// "2026-11-16T09:00"). ok is false for anything else: a date alone, a time alone, a day the month doesn't have.
+func parseAt(input string) (float64, bool) {
+	v := js.Trim(input)
+	if len(v) < 16 || !startsWithDate(v) || (v[10] != 'T' && v[10] != 't' && v[10] != ' ') {
+		return 0, false
+	}
+	number := func(s string, size int) (int, bool) {
+		if len(s) != size || strings.Trim(s, "0123456789") != "" {
+			return 0, false
+		}
+		n, err := strconv.Atoi(s)
+		return n, err == nil
+	}
+	year, _ := number(v[0:4], 4)
+	month, _ := number(v[5:7], 2)
+	day, _ := number(v[8:10], 2)
+	clock, zone := v[11:], ""
+	if i := strings.IndexAny(clock, "Zz+-"); i >= 0 {
+		clock, zone = clock[:i], clock[i:]
+	}
+	fields := strings.Split(clock, ":")
+	if len(fields) < 2 || len(fields) > 3 {
+		return 0, false
+	}
+	hour, okHour := number(fields[0], 2)
+	minute, okMinute := number(fields[1], 2)
+	second, millis, okSecond := 0, 0, true
+	if len(fields) == 3 {
+		whole, fraction, hasFraction := strings.Cut(fields[2], ".")
+		second, okSecond = number(whole, 2)
+		if hasFraction {
+			if _, ok := number(fraction, len(fraction)); !ok || len(fraction) > 9 {
+				return 0, false
+			}
+			millis, _ = strconv.Atoi((fraction + "00")[:3])
+		}
+	}
+	lastDay := time.Date(year, time.Month(month)+1, 0, 0, 0, 0, 0, time.UTC).Day()
+	if !okHour || !okMinute || !okSecond || month < 1 || month > 12 || day < 1 || day > lastDay || hour > 23 || minute > 59 || second > 59 {
+		return 0, false
+	}
+	offset := ""
+	switch {
+	case zone == "":
+	case zone == "Z" || zone == "z":
+		offset = "Z"
+	default:
+		hours, okHours := number(zone[1:min(3, len(zone))], 2)
+		minutes, okMinutes := 0, false
+		if len(zone) == 6 && zone[3] == ':' {
+			minutes, okMinutes = number(zone[4:], 2)
+		}
+		if !okHours || !okMinutes || hours > 23 || minutes > 59 {
+			return 0, false
+		}
+		offset = zone
+	}
+	millisText := strconv.Itoa(1000 + millis)[1:]
+	t := js.ParseDate(v[0:10] + "T" + pad2(hour) + ":" + pad2(minute) + ":" + pad2(second) + "." + millisText + offset)
+	return t, js.IsValid(t)
+}
+
+// formatWhen is a moment in this computer's time zone and in UTC: "2026-11-16 09:00 (2026-11-16 07:00 UTC)", or
+// "2026-11-16 07:00 UTC" when this computer keeps UTC; the seconds show when there are some.
+func formatWhen(t float64) string {
+	utc := clockText(js.UTCParts(t)) + " UTC"
+	if js.LocalOffset(t) == 0 {
+		return utc
+	}
+	return clockText(js.LocalParts(t)) + " (" + utc + ")"
+}
+
+func clockText(p js.Parts) string {
+	text := strconv.FormatInt(p.Year, 10) + "-" + pad2(p.Month) + "-" + pad2(p.Day) + " " + pad2(p.Hour) + ":" + pad2(p.Minute)
+	if p.Second != 0 {
+		text += ":" + pad2(p.Second)
+	}
+	return text
 }
 
 // parseSeconds reads --timeout and --interval: a positive number of seconds, with an optional trailing "s".

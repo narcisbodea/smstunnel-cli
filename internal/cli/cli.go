@@ -120,11 +120,14 @@ var sendOptions = []optionSpec{
 	{name: "idempotency-key"},
 }
 
+// sendTextOptions are send's: code's, and --at (sign-in codes go out when they are asked for).
+var sendTextOptions = append(append([]optionSpec(nil), sendOptions...), optionSpec{name: "at"})
+
 var commandOptions = map[string][]optionSpec{
 	"login":  nil,
 	"logout": nil,
 	"phones": nil,
-	"send":   sendOptions,
+	"send":   sendTextOptions,
 	"code":   sendOptions,
 	"status": nil,
 	"received": {
@@ -136,17 +139,23 @@ var commandOptions = map[string][]optionSpec{
 		{name: "interval"},
 	},
 	"usage": nil,
+	"scheduled": {
+		{name: "done", isBool: true},
+		{name: "limit"},
+		{name: "page"},
+	},
 }
 
 var commands = map[string]func(c *runContext, args []string) (int, error){
-	"login":    login,
-	"logout":   logout,
-	"phones":   phones,
-	"send":     func(c *runContext, args []string) (int, error) { return send(c, args, false) },
-	"code":     func(c *runContext, args []string) (int, error) { return send(c, args, true) },
-	"status":   status,
-	"received": received,
-	"usage":    usage,
+	"login":     login,
+	"logout":    logout,
+	"phones":    phones,
+	"send":      func(c *runContext, args []string) (int, error) { return send(c, args, false) },
+	"code":      func(c *runContext, args []string) (int, error) { return send(c, args, true) },
+	"status":    status,
+	"received":  received,
+	"usage":     usage,
+	"scheduled": scheduled,
 }
 
 func allOptions() []optionSpec {
@@ -161,7 +170,7 @@ func allOptions() []optionSpec {
 		}
 	}
 	add(globalOptions)
-	for _, name := range []string{"login", "logout", "phones", "send", "code", "status", "received", "usage"} {
+	for _, name := range []string{"login", "logout", "phones", "send", "code", "status", "received", "usage", "scheduled"} {
 		add(commandOptions[name])
 	}
 	return all

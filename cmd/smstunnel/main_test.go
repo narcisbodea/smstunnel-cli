@@ -90,7 +90,7 @@ func exitCode(err error) int {
 
 func TestBinaryBasics(t *testing.T) {
 	cmd, stdout, _ := command(t, "--version")
-	if err := cmd.Run(); err != nil || stdout.String() != "1.0.0\n" {
+	if err := cmd.Run(); err != nil || stdout.String() != "1.1.0\n" {
 		t.Errorf("--version: %v %q", err, stdout.String())
 	}
 	cmd, stdout, _ = command(t, "--help")

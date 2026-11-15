@@ -4,12 +4,13 @@ Send texts from your computer through your own Android phone and number.
 
 `smstunnel` is the command-line tool for [SMSTunnel](https://smstunnel.io): you write a text in your terminal or a
 script, SMSTunnel hands it to your linked Android phone, and your phone sends it from your own number, on your own SIM
-and plan. It also checks whether a text went out, sends sign-in codes, lists the texts your phone received and shows
-what is left of your plan today.
+and plan. It also schedules texts for later, checks whether a text went out, sends sign-in codes, lists the texts your
+phone received and shows what is left of your plan today.
 
 This is the native version: one small program for Windows, macOS and Linux, nothing else to install. It behaves
 exactly like the Node.js version (coming to npm as `smstunnel`): the same commands, options, output and exit codes,
-and the same saved login, so you can use either.
+and the same saved login, so you can use either. Scheduled texts (`send --at`, `smstunnel scheduled`, new in 1.1.0)
+come in this version first.
 
 - Your API key stays in your system keychain (macOS Keychain, Windows Credential Manager, the Linux Secret Service),
   or in a file only you can read.
@@ -107,6 +108,37 @@ One number per text: `smstunnel send "+40712345678,+40722333444" …` is refused
 Texts can have up to 1600 characters. Plain Latin text fits 160 characters in one SMS part; a text with characters such
 as ș, ț or emoji fits 70, and longer texts are split into parts by your phone.
 
+## Scheduled texts
+
+```bash
+smstunnel send +40712345678 "Your appointment is today at 10:30" --at "2026-11-16 09:00"
+```
+
+```
+Scheduled for 2026-11-16 09:00 (2026-11-16 07:00 UTC): SMSTunnel hands it to your phone then, which sends it from your number.
+Scheduled id: 6738c0ffee0123456789abcd. Cancel it with: smstunnel scheduled cancel 6738c0ffee0123456789abcd
+```
+
+`--at` takes a date and a time 1 minute to 30 days ahead: `"2026-11-16 09:00"` (or `2026-11-16T09:00`) is in this
+computer's time zone, and a time with its offset (`2026-11-16T09:00:00+02:00`, `2026-11-16T07:00:00Z`) is exactly that
+moment; the CLI prints the time in UTC too. At that time SMSTunnel sends the text exactly as if you ran
+`smstunnel send` then, with the same key: the phone, the country code and your plan's daily allowance are those of that
+moment, and the text counts then. If your phone is offline, the text waits for it up to 3 days. `--phone`, `--country`,
+`--idempotency-key` and `--json` work as for any text; `--wait` doesn't go with `--at`, and sign-in codes can't be
+scheduled.
+
+```bash
+smstunnel scheduled                                  # the ones still waiting, soonest first
+smstunnel scheduled --done                           # sent, failed or canceled in the last 30 days
+smstunnel scheduled cancel 6738c0ffee0123456789abcd  # while it still waits
+```
+
+`smstunnel scheduled` lists only the texts this key scheduled (`--limit` up to 100, `--page`, `--json`). Your plan lets
+10 (Free), 50 (Starter), 200 (Standard), 500 (Professional) or 1000 (Enterprise) texts wait at once, counting those
+scheduled in the dashboard and with your other keys. `--done` shows the message id of each text that went out, for
+`smstunnel status`, and why one failed. Canceling a text that was already canceled ends with 0; one that already went
+out or failed can't be canceled (exit 2).
+
 ## Send a sign-in code
 
 ```bash
@@ -193,10 +225,10 @@ Send only texts people expect from you: alerts to yourself, reminders, sign-in c
 |---|---|
 | 0 | Done. A text "not confirmed by your phone" also ends with 0: it was most likely sent, never send it again |
 | 1 | Something unexpected |
-| 2 | Invalid arguments, or SMSTunnel refused the input (HTTP 400), or the `--idempotency-key` was already used for a different text (HTTP 422) |
+| 2 | Invalid arguments, or SMSTunnel refused the input (HTTP 400), or the `--idempotency-key` was already used for a different text (HTTP 422), or a scheduled text that already went out or failed can't be canceled (HTTP 409) |
 | 3 | No API key, or SMSTunnel refused it (HTTP 401) |
-| 4 | The key or your plan doesn't allow it (HTTP 403), for example a key that may not read received texts |
-| 5 | Not found (HTTP 404): an unknown message id or phone |
+| 4 | The key or your plan doesn't allow it (HTTP 403), for example a key that may not read received texts, or as many scheduled texts wait as your plan allows |
+| 5 | Not found (HTTP 404): an unknown message id, scheduled text or phone |
 | 6 | Too many requests (HTTP 429 with `Retry-After`: the CLI says how many seconds to wait), today's allowance is used up (429 without it), or a request with the same `--idempotency-key` is still being handled (HTTP 409) |
 | 7 | SMSTunnel could not be reached or had a problem (5xx). If a send broke after it left, the CLI says the text may have gone out: check before sending it again, or run the same command with the same `--idempotency-key` |
 | 8 | The text failed (`send --wait` / `code --wait`) |
@@ -237,6 +269,7 @@ Commands:
 - smstunnel send <number> <text> [--phone <id or name>] [--country +40] [--wait [--timeout 120]] [--idempotency-key <key>] [--json]
 - smstunnel code <number> <text> for sign-in codes only: the text must contain the code, 4 to 10 digits standing on their own (482913) or 123-456, at most 320 characters.
 - smstunnel status <message id>, smstunnel phones, smstunnel usage, smstunnel received [--since 2h] [--watch]. Received texts need the key's "Can also read received texts" opt-in.
+- smstunnel send <number> <text> --at "2026-11-16 09:00" schedules the text 1 minute to 30 days ahead (local time, or RFC 3339 with an offset) and prints its scheduled id; smstunnel scheduled [--done] lists them, smstunnel scheduled cancel <id> cancels one. It counts on the plan when it goes out.
 One number per command: to text several people, run it once per number. Numbers in international format (+14155550123); --country completes a number written without + or 00. Texts up to 1600 characters.
 Behind it is the SMSTunnel API: POST https://smstunnel.io/api/v1/sms/send with the header X-API-Key and {"to", "message", "deviceId"?, "defaultCountryCode"?}, one recipient per call, 30 send requests a minute per key.
 Exit codes: 0 done; 2 bad input (400) or an idempotency key reused for a different text; 3 key refused (401); 4 not allowed for this key or plan (403, with a code such as PERMISSION_REQUIRED); 5 not found; 6 too many requests (429: wait the seconds it says) or today's allowance used up; 7 SMSTunnel unreachable or a 5xx (the text may have gone out: don't resend blindly); 8 the text failed (--wait); 9 still waiting for the phone (--wait: it is offline, the text goes out when it is back; don't resend). With --json the result is JSON on stdout and errors are JSON on stderr: {"error":{"message","exitCode","status"}}.

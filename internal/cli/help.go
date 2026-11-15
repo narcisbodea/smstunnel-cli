@@ -3,7 +3,8 @@ package cli
 const exitCodesHelp = `Exit codes:
   0  done (a text not confirmed by the phone counts as sent: don't send it again)
   1  something unexpected
-  2  invalid arguments, or SMSTunnel refused the input (400; 422: --idempotency-key used for another text)
+  2  invalid arguments, or SMSTunnel refused the input (400; 422: --idempotency-key used for another text;
+     409: a scheduled text that already went out or failed can't be canceled)
   3  no API key, or SMSTunnel refused it (401)
   4  the key or your plan doesn't allow it (403)
   5  not found (404)
@@ -27,6 +28,7 @@ Commands:
   status <message-id>         Where a text is now
   received                    Texts your phone received (needs a key allowed to read them)
   usage                       Your plan, today's usage and what is left
+  scheduled [cancel <id>]     Texts you scheduled with send --at, or cancel one
 
 Options for every command:
   --json                Print JSON (errors go to stderr, as JSON too)
@@ -75,12 +77,16 @@ Options:
   --idempotency-key <key>
                         Run the same command again with the same key (within 24 hours) and
                         SMSTunnel gives back the first answer instead of sending a second text
+  --at <time>           Schedule it instead of sending it now, 1 minute to 30 days ahead:
+                        "2026-11-16 09:00" (this computer's time) or 2026-11-16T07:00:00Z.
+                        It goes out then as if you sent it then. See "smstunnel scheduled".
 
 Examples:
   smstunnel send +40712345678 "Your order is ready for pickup"
   smstunnel send 0712345678 --country +40 --phone "Store phone" --wait "See you at 10"
   echo "Backup finished" | smstunnel send +40712345678
   smstunnel send +40712345678 "Order 1042 is ready" --idempotency-key order-1042-ready
+  smstunnel send +40712345678 "Your appointment is today at 10:30" --at "2026-11-16 09:00"
 
 Texts go out in the order you send them, up to 1600 characters each. If none of your phones is
 online, the text waits and goes out when one is back online (within 3 days).`,
@@ -117,6 +123,20 @@ Options:
 	"usage": `Usage: smstunnel usage [--json]
 
 Your plan, how many texts and sign-in codes you used today and how many are left.`,
+
+	"scheduled": `Usage: smstunnel scheduled [options]
+       smstunnel scheduled cancel <id> [--json]
+
+The texts this key scheduled with "smstunnel send --at", soonest first. At its time SMSTunnel
+sends each one as if you sent it then, with the same key: it counts on your plan then.
+
+Options:
+  --done                The ones that went out, failed or were canceled (kept 30 days), newest first
+  --limit <n>           How many, 1 to 100 (default 50)
+  --page <n>            Which page, from 1
+
+"smstunnel scheduled cancel <id>" cancels one while it waits. Your plan lets 10 (Free) to
+1000 (Enterprise) texts wait at once.`,
 }
 
 // helpFor is the help of a command, or the main help when the command is missing or unknown.

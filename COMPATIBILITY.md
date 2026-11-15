@@ -17,7 +17,7 @@ login. This file says how that is done, how it is checked, and where the two dif
     it means in Node.js, plus ICU's rule for local times in a daylight-saving gap or overlap;
   - the WHATWG URL rules behind `--api-base` (IPv4 forms such as `127.1`, IPv6, `https:host`, dot segments,
     percent-encoding), and `URLSearchParams` for the query.
-- HTTP goes through [smstunnel-go](https://github.com/narcisbodea/smstunnel-go) 1.0.0's `Client`. The Node.js version
+- HTTP goes through [smstunnel-go](https://github.com/narcisbodea/smstunnel-go) 1.1.0's `Client`. The Node.js version
   prints SMSTunnel's answers as they came and decides from their raw JSON, and sends the country code as typed, so the
   CLI gives the library its own `http.Client` (`WithHTTPClient`): the transport sends exactly the request the Node.js
   version sends (URL and query order, JSON body, headers) and keeps each answer as it came. It also connects the way
@@ -35,6 +35,22 @@ login. This file says how that is done, how it is checked, and where the two dif
 `parity.mjs` normalises only ids, times, ports and temporary paths (and, against the shared local API, the usage
 counts that other keys of the same account change). Every run gets `SMSTUNNEL_API_BASE` pointing at a closed local
 port unless a scenario sets its own address, so no scenario can reach smstunnel.io.
+
+## Scheduled texts (1.1.0): in this version only
+
+1.1.0 adds `send --at <time>` and `smstunnel scheduled` (list, `--done`, `cancel <id>`), which the Node.js version
+(1.0.0, not on npm yet) doesn't have, and the 409 exit code for a text that can't be canceled. Everything else is as
+in 1.0.0, so the checks above still describe the other commands; `smstunnel --help` and `smstunnel send --help` differ
+by the new lines. The golden cases and `test/parity/parity.mjs` don't cover the new commands (they have no Node.js
+counterpart); `internal/cli/scheduled_test.go` does, against the mock API. The design keeps the Node.js style, so the
+Node.js version can add them as they are:
+
+- `--at` takes `YYYY-MM-DD HH:MM[:SS]` (a space or `T`) in local time, as `Date.parse` reads `2026-11-16T09:00`, or
+  with `Z` or `±HH:MM`; a date alone, a time alone and days a month doesn't have are refused before anything is sent.
+  The body gets `sendAt` as `toISOString()` (UTC), after `defaultCountryCode`.
+- `smstunnel scheduled` asks `GET /sms/scheduled` with `scope=done`, `limit` and `page` in that order, and prints
+  `JSON.stringify(data, null, 2)` with `--json`; `cancel` sends `DELETE /sms/scheduled/{id}`, and after a 409 reads
+  `GET /sms/scheduled/{id}` to say what happened (already canceled: exit 0).
 
 ## Where the specification and the Node.js code disagree
 

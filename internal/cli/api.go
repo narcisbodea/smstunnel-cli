@@ -191,7 +191,7 @@ func (c *apiClient) getReceived(q receivedQuery) (*answer, error) {
 	})
 }
 
-// sendText posts one text: body is {to, message[, deviceId][, defaultCountryCode]}.
+// sendText posts one text: body is {to, message[, deviceId][, defaultCountryCode][, sendAt]}.
 func (c *apiClient) sendText(code bool, body js.Value, idempotencyKey string) (*answer, error) {
 	in := &intent{method: http.MethodPost, path: "/sms/send", body: []byte(js.Stringify(body, ""))}
 	if code {
@@ -216,6 +216,11 @@ func (c *apiClient) sendText(code bool, body js.Value, idempotencyKey string) (*
 	if idempotencyKey != "" {
 		opts = append(opts, smstunnel.WithIdempotencyKey(idempotencyKey))
 	}
+	if at := body.Get("sendAt"); at.IsString() {
+		if t := js.ParseDate(at.Str()); js.IsValid(t) {
+			opts = append(opts, smstunnel.WithSendAt(time.UnixMilli(int64(t))))
+		}
+	}
 	return c.do(in, func(ctx context.Context) error {
 		var err error
 		if code {
@@ -223,6 +228,51 @@ func (c *apiClient) sendText(code bool, body js.Value, idempotencyKey string) (*
 		} else {
 			_, err = c.lib.SendSMS(ctx, to, message, opts...)
 		}
+		return err
+	})
+}
+
+// scheduledQuery is what "smstunnel scheduled" lists: the texts still waiting, or done ones; 0 leaves limit or page
+// to SMSTunnel.
+type scheduledQuery struct {
+	done        bool
+	limit, page int
+}
+
+// getScheduled lists the texts this key scheduled: GET /sms/scheduled[?scope=done][&limit=n][&page=n].
+func (c *apiClient) getScheduled(q scheduledQuery) (*answer, error) {
+	in := &intent{method: http.MethodGet, path: "/sms/scheduled"}
+	var lib smstunnel.ScheduledTextsQuery
+	if q.done {
+		in.query = append(in.query, [2]string{"scope", "done"})
+		lib.Scope = smstunnel.ScheduledScopeDone
+	}
+	if q.limit > 0 {
+		in.query = append(in.query, [2]string{"limit", js.NumberToString(float64(q.limit))})
+		lib.Limit = q.limit
+	}
+	if q.page > 0 {
+		in.query = append(in.query, [2]string{"page", js.NumberToString(float64(q.page))})
+		lib.Page = q.page
+	}
+	return c.do(in, func(ctx context.Context) error {
+		_, err := c.lib.ListScheduledTexts(ctx, lib)
+		return err
+	})
+}
+
+// getScheduledText reads one scheduled text (id: 24 hex characters, checked by the caller).
+func (c *apiClient) getScheduledText(id string) (*answer, error) {
+	return c.do(&intent{method: http.MethodGet, path: "/sms/scheduled/" + id}, func(ctx context.Context) error {
+		_, err := c.lib.GetScheduledText(ctx, id)
+		return err
+	})
+}
+
+// cancelScheduled cancels a scheduled text while it waits: DELETE /sms/scheduled/{id}.
+func (c *apiClient) cancelScheduled(id string) (*answer, error) {
+	return c.do(&intent{method: http.MethodDelete, path: "/sms/scheduled/" + id}, func(ctx context.Context) error {
+		_, err := c.lib.CancelScheduledText(ctx, id)
 		return err
 	})
 }
@@ -259,6 +309,9 @@ func (c *apiClient) interpret(ex *exchange) (*answer, error) {
 			}
 			if v := parsed.Get("permission"); v.IsString() {
 				e.permission = v
+			}
+			if v := parsed.Get("max"); v.Kind() == js.Number {
+				e.max = v
 			}
 		}
 		if values := ex.header.Values("Retry-After"); len(values) > 0 {

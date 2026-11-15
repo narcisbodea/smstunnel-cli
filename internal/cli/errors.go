@@ -41,6 +41,7 @@ type apiError struct {
 	code           js.Value
 	permission     js.Value
 	retryAfter     js.Value
+	max            js.Value // SCHEDULE_LIMIT_REACHED: how many texts the plan lets wait at once
 	networkCode    string
 	mayHaveArrived bool
 	replayed       bool
@@ -65,6 +66,10 @@ const (
 	opStatus   operation = "status"
 	opReceived operation = "received"
 	opUsage    operation = "usage"
+
+	// Scheduled texts (smstunnel scheduled), which the Node.js version doesn't have.
+	opScheduled operation = "scheduled"
+	opCancel    operation = "cancel"
 )
 
 type keySource string
@@ -79,7 +84,8 @@ type errorContext struct {
 	operation      operation
 	keySource      keySource
 	apiBase        string
-	idempotencyKey bool // the send carried --idempotency-key
+	idempotencyKey bool   // the send carried --idempotency-key
+	scheduleAt     string // send --at: the time asked for, as formatWhen writes it; "" for a text sent now
 }
 
 func sends(op operation) bool { return op == opSend || op == opCode }
@@ -114,12 +120,23 @@ func describeAPIError(e *apiError, c errorContext) *CliError {
 
 	switch e.kind {
 	case "network", "timeout":
+		if sends(c.operation) && e.mayHaveArrived && c.scheduleAt != "" {
+			next := `Check "smstunnel scheduled" before you schedule it again.`
+			if c.idempotencyKey {
+				next = "Run the same command again with the same --idempotency-key: SMSTunnel will not schedule the text twice."
+			}
+			return fail("The connection to SMSTunnel broke after the text was handed over, so it may have been scheduled. "+next, exitUnavailable)
+		}
 		if sends(c.operation) && e.mayHaveArrived {
 			next := "Check the Messages page in your dashboard (" + dashboardURL + ") before you send it again."
 			if c.idempotencyKey {
 				next = sameKeyAgain
 			}
 			return fail("The connection to SMSTunnel broke after the text was handed over, so it may have gone out. "+next, exitUnavailable)
+		}
+		if c.operation == opCancel && e.mayHaveArrived {
+			return fail("The connection to SMSTunnel broke after the request was sent, so the text may already be canceled. "+
+				"Run the same command again to find out.", exitUnavailable)
 		}
 		why := e.networkCode
 		if e.kind == "timeout" {
@@ -135,6 +152,11 @@ func describeAPIError(e *apiError, c errorContext) *CliError {
 	status := e.statusCode()
 	said := e.message
 	switch {
+	case status == 400 && c.scheduleAt != "" && e.code.StrictEquals("SCHEDULE_TOO_SOON"):
+		return fail("--at "+c.scheduleAt+" is too soon: SMSTunnel schedules texts from 1 minute to 30 days ahead. "+
+			"To send the text now, leave out --at.", exitUsage)
+	case status == 400 && c.scheduleAt != "" && e.code.StrictEquals("SCHEDULE_TOO_FAR"):
+		return fail("--at "+c.scheduleAt+" is too far ahead: SMSTunnel schedules texts from 1 minute to 30 days ahead.", exitUsage)
 	case status == 400:
 		return fail("SMSTunnel refused the request: "+said, exitUsage)
 	case status == 422 && e.code.StrictEquals("IDEMPOTENCY_KEY_REUSED"):
@@ -147,6 +169,8 @@ func describeAPIError(e *apiError, c errorContext) *CliError {
 		}
 		return fail("SMSTunnel is still handling an earlier request with this --idempotency-key. Run the same command again in "+
 			seconds(n)+" to get its answer; it will not send a second text.", exitRateLimited)
+	case status == 409 && e.code.StrictEquals("SCHEDULE_NOT_EDITABLE"):
+		return fail("This scheduled text can't be canceled any more: it already went out, failed or was canceled.", exitUsage)
 	case status == 401:
 		from := " (the saved key)"
 		switch c.keySource {
@@ -167,8 +191,12 @@ func describeAPIError(e *apiError, c errorContext) *CliError {
 				return fail("This API key may not read received texts. In your dashboard ("+dashboardURL+" → Apps), choose "+
 					`"Allow reading received texts" for this key, or add an app with "Can also read received texts" ticked. `+
 					`Your phone also needs "Sync received texts" turned on in the SMSTunnel app; only texts that arrive after that are synced.`, exitForbidden)
+			case e.permission.StrictEquals("sms:send") && c.operation == opCancel:
+				return fail(`This API key may not cancel scheduled texts (it lacks the "sms:send" permission). `+dashboardKeyHint+".", exitForbidden)
 			case e.permission.StrictEquals("sms:send"):
 				return fail(`This API key may not send texts (it lacks the "sms:send" permission). `+dashboardKeyHint+".", exitForbidden)
+			case e.permission.StrictEquals("sms:read") && c.operation == opScheduled:
+				return fail(`This API key may not list scheduled texts (it lacks the "sms:read" permission). `+dashboardKeyHint+".", exitForbidden)
 			case e.permission.StrictEquals("sms:read"):
 				return fail(`This API key may not check whether texts went out (it lacks the "sms:read" permission). `+dashboardKeyHint+".", exitForbidden)
 			}
@@ -178,10 +206,23 @@ func describeAPIError(e *apiError, c errorContext) *CliError {
 			}
 			return fail(`This API key lacks the "`+permission+`" permission. `+said, exitForbidden)
 		}
+		if e.code.StrictEquals("SCHEDULE_LIMIT_REACHED") {
+			allowed := "as many scheduled texts as your plan lets wait at once"
+			if e.max.Kind() == js.Number {
+				allowed = "the " + e.max.String() + " scheduled texts your plan lets wait at once"
+			}
+			return fail("Your account already has "+allowed+". Wait until some go out, or cancel one (see \"smstunnel scheduled\").", exitForbidden)
+		}
 		return fail("SMSTunnel refused this: "+said, exitForbidden)
 	case status == 404:
 		if c.operation == opStatus {
 			return fail("No text with that id for this key.", exitNotFound)
+		}
+		if c.operation == opCancel {
+			return fail(`No scheduled text with that id for this key. "smstunnel scheduled" lists the ones waiting.`, exitNotFound)
+		}
+		if c.scheduleAt != "" && e.code.StrictEquals("SCHEDULE_PHONE_NOT_FOUND") {
+			return fail(`That phone isn't in your account. List your phones and their ids with "smstunnel phones".`, exitNotFound)
 		}
 		if sends(c.operation) || c.operation == opReceived {
 			return fail(said+`. List your phones and their ids with "smstunnel phones".`, exitNotFound)
@@ -214,6 +255,12 @@ func describeAPIError(e *apiError, c errorContext) *CliError {
 			then := "The text may or may not have been taken: check the Messages page in your dashboard (" + dashboardURL + ") before you send it again."
 			if c.idempotencyKey {
 				then = "The text may or may not have been taken: check the Messages page in your dashboard (" + dashboardURL + "). Running the command again with the same key gets this answer again; use a new key only once you know the text did not go out."
+			}
+			if c.scheduleAt != "" {
+				then = `The text may or may not have been scheduled: check "smstunnel scheduled" before you schedule it again.`
+				if c.idempotencyKey {
+					then = `The text may or may not have been scheduled: check "smstunnel scheduled". Running the command again with the same key gets this answer again; use a new key only once you know the text was not scheduled.`
+				}
 			}
 			return fail(first+then, exitUnavailable)
 		}
