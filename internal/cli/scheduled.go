@@ -109,6 +109,14 @@ func scheduled(c *runContext, args []string) (int, error) {
 	}
 	items := itemsValue.Items()
 	if len(items) == 0 {
+		if total := data.Get("total"); total.Kind() == js.Number && total.Num() > 0 {
+			shown := data.Get("page")
+			if shown.Kind() != js.Number {
+				shown = js.IntValue(max(page, 1))
+			}
+			c.line("Page " + shown.String() + " is past the last one: " + total.String() + " in all. Use a smaller --page.")
+			return exitOK, nil
+		}
 		if done {
 			c.line("No scheduled texts went out, failed or were canceled in the last 30 days.")
 		} else {

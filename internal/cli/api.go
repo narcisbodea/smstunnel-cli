@@ -216,9 +216,13 @@ func (c *apiClient) sendText(code bool, body js.Value, idempotencyKey string) (*
 	if idempotencyKey != "" {
 		opts = append(opts, smstunnel.WithIdempotencyKey(idempotencyKey))
 	}
+	// The library refuses the zero time (0001-01-01T00:00Z) before sending; the transport sends the body above in
+	// any case, so SMSTunnel answers it (too soon) as it answers any time in the past.
 	if at := body.Get("sendAt"); at.IsString() {
 		if t := js.ParseDate(at.Str()); js.IsValid(t) {
-			opts = append(opts, smstunnel.WithSendAt(time.UnixMilli(int64(t))))
+			if when := time.UnixMilli(int64(t)); !when.IsZero() {
+				opts = append(opts, smstunnel.WithSendAt(when))
+			}
 		}
 	}
 	return c.do(in, func(ctx context.Context) error {

@@ -233,6 +233,8 @@ func TestMockSendAtRefusals(t *testing.T) {
 	}{
 		{[]string{"send", "+40712345678", "Hi", "--at", soon}, 2, `^--at .+ is too soon: SMSTunnel schedules texts from 1 minute to 30 days ahead\. To send the text now, leave out --at\.\n$`},
 		{[]string{"send", "+40712345678", "Hi", "--at", far}, 2, `^--at .+ is too far ahead: SMSTunnel schedules texts from 1 minute to 30 days ahead\.\n$`},
+		// Go's zero time: the library would refuse it, so it goes to SMSTunnel like any time in the past.
+		{[]string{"send", "+40712345678", "Hi", "--at", "0001-01-01T00:00Z"}, 2, `^--at .+ is too soon: `},
 		{[]string{"send", numOldServer, "Hi", "--at", later}, 2, `^SMSTunnel refused the request: property sendAt should not exist\n$`},
 		{[]string{"send", numScheduleFull, "Hi", "--at", later}, 4, `^Your account already has the 10 scheduled texts your plan lets wait at once\. Wait until some go out, or cancel one \(see "smstunnel scheduled"\)\.\n$`},
 		{[]string{"send", "+40712345678", "Hi", "--at", later, "--phone", "ffffffffffffffffffffffff"}, 5, `^That phone isn't in your account\.`},
@@ -312,6 +314,11 @@ func TestMockScheduledList(t *testing.T) {
 	}
 	if !strings.Contains(two.stdout, later) || strings.Contains(two.stdout, sooner) || two.stderr != "" {
 		t.Errorf("page 2: %q %q", two.stdout, two.stderr)
+	}
+	past := s.run("scheduled", "--limit", "1", "--page", "3")
+	expectCode(t, past, 0)
+	if past.stdout != "Page 3 is past the last one: 2 in all. Use a smaller --page.\n" {
+		t.Errorf("past the last page: %q", past.stdout)
 	}
 
 	// Another key of the account sees none of them, but they count for the account.
